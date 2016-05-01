@@ -1,0 +1,3 @@
+/Cube.assetbundle,b2f7c5752b136a02320b976c91e38e09
+/sphere.assetbundle,9fdcbd576f98b45ff942f6aaecd20197
+/version.txt,685d4d2bcede9eab995faf537061f508
