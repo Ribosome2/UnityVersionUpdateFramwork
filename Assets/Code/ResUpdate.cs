@@ -1,40 +1,23 @@
-﻿using System.Linq.Expressions;
+﻿using System.Linq;
+using System.Linq.Expressions;
+using UnityEditor.VersionControl;
 using UnityEngine;    
 using System.Collections;    
 using System.Collections.Generic;    
 using System.Text;    
 using System.IO;
 using UnityEngineInternal;
+using FileMode = System.IO.FileMode;
 
 public class ResUpdate : MonoBehaviour
 {
-    public static readonly string VERSION_FILE = "version.txt";
-    public static readonly string LOCAL_RES_URL = "file:///E:/U3DProjects/VersionUpdate/FakeLocal/";
-    //public static string LOCAL_RES_URL
-    //{
-    //    get
-    //    {
-    //        switch (Application.platform)
-    //        {
-    //                case RuntimePlatform.Android:
-    //                return "jar:file://" + Application.dataPath + "!/assets/";
-    //            case RuntimePlatform.IPhonePlayer:
-    //                return Application.dataPath + "/Raw";
-    //            case RuntimePlatform.WindowsPlayer:
-    //                //Application.dataPath + "/Streamming Assets";
-    //            default: 
-    //                return "file://" + Application.dataPath + "/StreammingAssets/";
-                    
-    //        }
-            
-    //    }
-    //} 
-    public static readonly string SERVER_RES_URL = "file:///E:/U3DProjects/VersionUpdate/FakeWebServer/";
+   
     public static readonly string LOCAL_RES_PATH = Application.dataPath + "/Res/";
 
+    private Dictionary<string,string> LocalUpdatedVersion=new Dictionary<string,string>();
     private Dictionary<string,string> LocalResVersion=new Dictionary<string,string>();
     private Dictionary<string,string> ServerResVersion=new Dictionary<string, string>();
-    private List<string> NeedDownFiles;
+    private Dictionary<string, string> NeedDownFiles=new Dictionary<string, string>();
     private bool NeedUpdateLocalVersionFile = false;
 
     private void Start()
@@ -42,30 +25,44 @@ public class ResUpdate : MonoBehaviour
         //初始化    
         LocalResVersion = new Dictionary<string, string>();
         ServerResVersion =new Dictionary<string, string>();
-        NeedDownFiles = new List<string>();
+        LocalUpdatedVersion=new Dictionary<string, string>();
+        NeedDownFiles = new Dictionary<string, string>();
 
         //加载本地version配置    
-        StartCoroutine(DownLoad(LOCAL_RES_URL + VERSION_FILE, delegate(WWW localVersion)
+        StartCoroutine(ResUtility.DownLoad(ResUtility.OriginalVersionUrl, delegate(WWW localVersion)
         {
             //保存本地的version    
-            ParseVersionFile(localVersion.text, LocalResVersion);
-            //加载服务端version配置    
-            StartCoroutine(this.DownLoad(SERVER_RES_URL + VERSION_FILE, delegate(WWW serverVersion)
-            {
-                //保存服务端version    
-                ParseVersionFile(serverVersion.text, ServerResVersion);
-                //计算出需要重新加载的资源    
-                CompareVersion();
-                //加载需要更新的资源    
-                DownLoadRes();
-            }));
+            ResUtility.ParseVersionFile(localVersion.text, LocalResVersion);
+
+            
+            //加载本地version配置    
+            StartCoroutine(ResUtility.DownLoad(ResUtility.LocalUpdatedVersionUrl,delegate(WWW updatedVersion)
+                {
+                    //加载本地已经更新过的版本消息   
+                    ResUtility.ParseVersionFile(updatedVersion.text, LocalUpdatedVersion);
+                    CombineLocalVersion(); //获取完整的文件信息列表
+
+                    //加载服务端version配置    
+                    StartCoroutine(ResUtility.DownLoad(ResUtility.ServerVersionUrl, delegate(WWW serverVersion)
+                    {
+                        //保存服务端version    
+                        ResUtility.ParseVersionFile(serverVersion.text, ServerResVersion);
+                        //计算出需要重新加载的资源    
+                        CompareVersionAndMakeUpdateList();
+                        //加载需要更新的资源    
+                        DownLoadRes();
+                    }));
+
+                }));
 
         }));
+
     }
+
     Vector2 scrollPos=new Vector2();
     void OnGUI()
     {
-        GUILayout.Label("Local resource path"+LOCAL_RES_URL);
+        GUILayout.Label("Local resource path"+ResUtility.OriginalVersionUrl);
         GUILayout.Label("PersistenDataPath: "+Application.persistentDataPath);
         GUILayout.BeginScrollView(scrollPos);
         IEnumerator iter = LocalResVersion.GetEnumerator();
@@ -76,69 +73,77 @@ public class ResUpdate : MonoBehaviour
         }
         GUILayout.EndScrollView();
     }
+
+
     //依次加载需要更新的资源    
-    private void DownLoadRes()
+    private void DownLoadRes()  
     {
         if (NeedDownFiles.Count == 0)
         {
-            UpdateLocalVersionFile();
             return;
         }
+        
+        var file = NeedDownFiles.First();
+        NeedDownFiles.Remove(file.Key);
 
-        string file = NeedDownFiles[0];
-        NeedDownFiles.RemoveAt(0);
-
-        StartCoroutine(this.DownLoad(SERVER_RES_URL + file, delegate(WWW w)
+        StartCoroutine(ResUtility.DownLoad(ResUtility.SERVER_RES_URL + file, delegate(WWW w)
         {
             //将下载的资源替换本地就的资源    
-            ReplaceLocalRes(file, w.bytes);
+            ReplaceLocalRes(file.Key,file.Value, w.bytes);
             DownLoadRes();
         }));
     }
 
-    private void ReplaceLocalRes(string fileName, byte[] data)
+    private void ReplaceLocalRes(string fileName,string strMd5, byte[] data)
     {
         string filePath = LOCAL_RES_PATH + fileName;
         FileStream stream = new FileStream(LOCAL_RES_PATH + fileName, FileMode.Create);
         stream.Write(data, 0, data.Length);
         stream.Flush();
         stream.Close();
+        //每更新成功一个文件更新一次version文件
+        AddOrUpdateLocalVersionInfo(fileName,strMd5);
+        ResUtility.UpdateLocalVersionFile(LocalUpdatedVersion);
     }
 
-    
-    //显示资源    
-    private IEnumerator Show()
-    {
-        WWW asset = new WWW(LOCAL_RES_URL + "Cube.assetbundle");
-        yield return asset;
-        AssetBundle bundle = asset.assetBundle;
-        Instantiate(bundle.LoadAsset("Cube"));
-        bundle.Unload(false);
-    }
 
-    //更新本地的version配置    
-    private void UpdateLocalVersionFile()
+    void AddOrUpdateLocalVersionInfo(string fileName,string md5)
     {
-        if (NeedUpdateLocalVersionFile)
+        if (LocalUpdatedVersion.ContainsKey(fileName))
         {
-            StringBuilder versions = new StringBuilder();
-            foreach (var item in ServerResVersion)
-            {
-                versions.Append(item.Key).Append(",").Append(item.Value).Append("\n");
-            }
-
-            FileStream stream = new FileStream(LOCAL_RES_PATH + VERSION_FILE, FileMode.Create);
-            byte[] data = Encoding.UTF8.GetBytes(versions.ToString());
-            stream.Write(data, 0, data.Length);
-            stream.Flush();
-            stream.Close();
+            LocalUpdatedVersion[fileName] = md5;
         }
-        //加载显示对象    
-        StartCoroutine(Show());
+        else
+        {
+            LocalUpdatedVersion.Add(fileName,md5);
+        }
     }
 
-    private void CompareVersion()
+    /// <summary>
+    /// 把初始版本信息和已经更新过的版本信息组合，得到本地当前完整的文件信息
+    /// </summary>
+    void CombineLocalVersion()
     {
+        foreach (var version in LocalUpdatedVersion)
+        {
+            if (LocalResVersion.ContainsKey(version.Key))  //如果重复，就用更新过的信息
+            {
+                LocalResVersion[version.Key] = version.Value;
+            }
+            else
+            {
+                LocalResVersion.Add(version.Key,version.Value);//没有就新增
+            }
+        }
+    }
+
+
+    /// <summary>
+    /// 对比本地版本和服务器版本信息，获得需要更新的列表
+    /// </summary>
+    private void CompareVersionAndMakeUpdateList()
+    {
+        NeedDownFiles.Clear();
         foreach (var version in ServerResVersion)
         {
             string fileName = version.Key;
@@ -146,7 +151,7 @@ public class ResUpdate : MonoBehaviour
             //新增的资源    
             if (!LocalResVersion.ContainsKey(fileName))
             {
-                NeedDownFiles.Add(fileName);
+                NeedDownFiles.Add(fileName,serverMd5);
             }
             else
             {
@@ -155,7 +160,7 @@ public class ResUpdate : MonoBehaviour
                 LocalResVersion.TryGetValue(fileName, out localMd5);
                 if (!serverMd5.Equals(localMd5))
                 {
-                    NeedDownFiles.Add(fileName);
+                    NeedDownFiles.Add(fileName,serverMd5);
                 }
             }
         }
@@ -163,38 +168,7 @@ public class ResUpdate : MonoBehaviour
         NeedUpdateLocalVersionFile = NeedDownFiles.Count > 0;
     }
 
-    private void ParseVersionFile(string content, Dictionary<string,string> dict)
-    {
-        if (content == null || content.Length == 0)
-        {
-            return;
-        }
-        string[] items = content.Split(new char[] {'\n'});
-        foreach (string item in items)
-        {
-            string[] info = item.Split(new char[] {','});
-            if (info != null && info.Length == 2)
-            {
-                dict.Add(info[0], info[1]);
-            }
-        }
+   
 
-    }
-
-    private IEnumerator DownLoad(string url, HandleFinishDownload finishFun)
-    {
-        WWW www = new WWW(url);
-        yield return www;
-        if (string.IsNullOrEmpty(www.error) == false)
-        {
-            Debug.LogError(string.Format("Load {0} error{1}",url,www.error));
-        }
-        if (finishFun != null)
-        {
-            finishFun(www);
-        }
-        www.Dispose();
-    }
-
-    public delegate void HandleFinishDownload(WWW www);
+  
 }
