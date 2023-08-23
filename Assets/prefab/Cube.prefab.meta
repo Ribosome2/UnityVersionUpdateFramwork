@@ -1,8 +1,7 @@
 fileFormatVersion: 2
 guid: 3f3f3726d3c20fb458ed4e64f6ea42de
-timeCreated: 1462099511
-licenseType: Pro
-NativeFormatImporter:
+PrefabImporter:
+  externalObjects: {}
   userData: 
-  assetBundleName: 
+  assetBundleName: cube
   assetBundleVariant: 

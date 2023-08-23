@@ -9,8 +9,54 @@ using Object = UnityEngine.Object;
 public class AssetBundleToolWnd : EditorWindow
 {
 
+    [MenuItem("Tools/打包工具")]
+    public static void OpenWindow()
+    {
+        GetWindow<AssetBundleToolWnd>();
+    }
+    static BuildTarget mBuildTarget=BuildTarget.StandaloneWindows;
+    private void OnGUI()
+    {
+        if(GUILayout.Button("Build选择的资源",GUILayout.Height(50)))
+        {
+            ExportResource();
+        }
+        
+        if(GUILayout.Button("Build选择的场景",GUILayout.Height(50)))
+        {
+            ExportScene();
+        }
 
-    private static BuildTarget mBuildTarget=BuildTarget.StandaloneWindows;
+        GUILayout.BeginHorizontal();
+        mBuildTarget=(BuildTarget)EditorGUILayout.EnumPopup(mBuildTarget,GUILayout.Width(200));
+        if(GUILayout.Button("Build所有的AB",GUILayout.Height(50)))
+        {
+            BuildAllAssetBundles();
+        }
+        GUILayout.EndHorizontal();
+        
+        if(GUILayout.Button("生成文件版本信息列表",GUILayout.Height(50)))
+        {
+            GenerateConfig();
+        }
+        
+        
+        
+        void BuildAllAssetBundles()
+        {
+            string assetBundleDirectory = "AssetBundles";
+            if(!Directory.Exists(assetBundleDirectory))
+            {
+                Directory.CreateDirectory(assetBundleDirectory);
+            }
+            BuildPipeline.BuildAssetBundles(assetBundleDirectory, 
+                BuildAssetBundleOptions.None, 
+                mBuildTarget);
+        }
+        
+        
+    }
+
 
     [MenuItem("Build/ExportResource")]
     static void ExportResource()
